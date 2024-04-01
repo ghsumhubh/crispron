@@ -28,18 +28,22 @@ import numpy as np
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 np.set_printoptions(threshold=np.inf)
 
-OPT = sys.argv[1] #optimizer (eg. adam)
-LEARN = float(sys.argv[2]) #learning rage eg.0.001
-EPOCHS = int(sys.argv[3]) # N. of epochs, eg 100
-SEQ_C = sys.argv[4] # get seq from this column
-VAL_C = sys.argv[5] # get value to train from this column 
-VAL_G = sys.argv[6] # get value to train from this column 
-N_VAL = int(sys.argv[7]) # number of validation set
-TEST_N = int(sys.argv[8]) # skip this test set
-BATCH_SIZE=int(sys.argv[9]) # batch test 
-SEED = int(sys.argv[10]) # common random seed (0 equals randomly set)
-TYPE = sys.argv[11] # common random seed (0 equals randomly set)
-TRAIN_FP = sys.argv[12:] # path to train sets
+
+OPT = 'adam'
+LEARN = 0.0001 
+EPOCHS = 5000 
+SEQ_C = "Sequence"
+VAL_C = "total_indel_eff_rescaled" 
+VAL_G = "CRISPRoff_score" 
+SEQ_C = "2"
+VAL_C = "4"
+VAL_G = "3"
+BATCH_SIZE=500 
+SEED = 0 
+TYPE = 'CG' 
+TEST_N = 0
+
+
 
 print(
 'OPT=%s' % OPT,
@@ -48,13 +52,10 @@ print(
 'SEQ_C=%s' % SEQ_C,
 'VAL_C=%s' % VAL_C,
 'VAL_G=%s' % VAL_G,
-'N_VAL=%i' % N_VAL,
-'TEST_N=%i' % TEST_N,
 'BATCH_SIZE=%i' % BATCH_SIZE,
 'SEED=%i' % SEED,
 'TYPE=%s' % TYPE,
 )
-print(', '.join(TRAIN_FP))
 
 #length of input seq
 eLENGTH=30
@@ -62,70 +63,61 @@ eLENGTH=30
 eDEPTH=4
 
 
-def read_seq_files(fns, seq_c0, val_c0, val_g0, n_val, test_n, test=False):
+def read_seq_files(seq_c0, val_c0, val_g0):
     d = OrderedDict()
-    for j, fn in enumerate(fns):
-        if j+1 == n_val:
-            #independent validation set
-            continue
-        if test and j+1 != test_n:
-            #not internal test set, skip when not loading test data
-            continue
-        if (not test) and j+1 == test_n:
-            #internal test set, skip when not loading training data
-            continue 
-        with open(fn, 'rt') as f:
-            head = f.readline().rstrip().split('\t')
-            if seq_c0.isnumeric():
-                seq_c = int(seq_c0) -1
+    fn = 'crispron_pretrain_with_crisproff.csv'
+    with open(fn, 'rt') as f:
+        head = f.readline().rstrip().split(',')
+        if seq_c0.isnumeric():
+            seq_c = int(seq_c0) -1
+        else:
+            if seq_c0 in head:
+                seq_c = head.index(seq_c0)
             else:
-                if seq_c0 in head:
-                    seq_c = head.index(seq_c0)
-                else:
-                    raise Exception
+                raise Exception
 
-            if val_c0.isnumeric():
-                val_c = int(val_c0) -1
+        if val_c0.isnumeric():
+            val_c = int(val_c0) -1
+        else:
+            if val_c0 in head:
+                val_c = head.index(val_c0)
             else:
-                if val_c0 in head:
-                    val_c = head.index(val_c0)
-                else:
-                    raise Exception
+                raise Exception
 
-            if val_g0.isnumeric():
-                val_g = int(val_g0) -1
+        if val_g0.isnumeric():
+            val_g = int(val_g0) -1
+        else:
+            if val_g0 in head:
+                val_g = head.index(val_g0)
             else:
-                if val_g0 in head:
-                    val_g = head.index(val_g0)
-                else:
-                    raise Exception
-            f.seek(0)
+                raise Exception
+        f.seek(0)
 
-            for i,l in enumerate(f):
-                v = l.rstrip().split('\t')
-                s = v[seq_c]
-                if not len(s) == eLENGTH:
-                    print('"%s" is not a string of length %d in line %d' % (s, eLENGTH, i+1))
-                    continue
+        for i,l in enumerate(f):
+            v = l.rstrip().split(',')
+            s = v[seq_c]
+            if not len(s) == eLENGTH:
+                print('"%s" is not a string of length %d in line %d' % (s, eLENGTH, i+1))
+                continue
 
-                if s in d:
-                    print('"%s" is not unique in line %d', (s, i+1))
-                    continue
+            if s in d:
+                print('"%s" is not unique in line %d', (s, i+1))
+                continue
 
-                try:
-                    e = float(v[val_c])
-                except:
-                    print('no float value for "%s" in line %d', (s, i+1))
-                    e = 0.0
-                    continue
-                try:
-                    g = float(v[val_g])
-                except:
-                    print('no float value for "%s" in line %d', (s, i+1))
-                    g = 0.0
-                    continue
+            try:
+                e = float(v[val_c])
+            except:
+                print('no float value for "%s" in line %d', (s, i+1))
+                e = 0.0
+                continue
+            try:
+                g = float(v[val_g])
+            except:
+                print('no float value for "%s" in line %d', (s, i+1))
+                g = 0.0
+                continue
 
-                d[s] = [g, e]
+            d[s] = [g, e]
     return d
 
 def onehot(x):
@@ -261,30 +253,56 @@ model.compile(loss='mse', optimizer=optimizer, metrics=['mae', 'mse'])
 utils.plot_model(model, to_file=str(TEST_N) + '.model.png', show_shapes=True, dpi=600)
 
 
-es = callbacks.EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience=150)
-mc = callbacks.ModelCheckpoint(str(TEST_N) + '.model.best', verbose=1, save_best_only=True)
+
 
 tinput = list()
 vinput = list()
 
 print('reading training data')
-d = read_seq_files(TRAIN_FP, SEQ_C, VAL_C, VAL_G, N_VAL, TEST_N, test=False)
+d = read_seq_files(SEQ_C, VAL_C, VAL_G)
 (s, x, g, y) = preprocess_seq(d)
 
-print('reading validation data')
-db = read_seq_files(TRAIN_FP, SEQ_C, VAL_C, VAL_G, N_VAL, TEST_N, test=True)
-(sv, xv, gv, yv) = preprocess_seq(db)
+from sklearn.model_selection import KFold
 
+# Number of folds
+n_splits = 6
+kf = KFold(n_splits=n_splits)
 
-if TYPE.find('C') > -1:
-    tinput.append(x)
-    vinput.append(xv)
+# Convert your data to numpy arrays if they aren't already, to ensure compatibility with sklearn's KFold.
+X = np.array(x)
+G = np.array(g)
+Y = np.array(y)
 
-if TYPE.find('G') > -1:
-    tinput.append(g)
-    vinput.append(gv)
+# Placeholder lists for history objects
+histories = []
+split_num = 0
+for train_index, val_index in kf.split(X):
+    # Splitting the data for this fold
+    x_train, x_val = X[train_index], X[val_index]
+    g_train, g_val = G[train_index], G[val_index]
+    y_train, y_val = Y[train_index], Y[val_index]
 
-tinput = tuple(tinput)
-vinput = tuple(vinput)
-history = model.fit(tinput, y, validation_data=(vinput, yv), batch_size=BATCH_SIZE, \
-        epochs=EPOCHS, use_multiprocessing=True, workers=16, verbose=2, callbacks=[es, mc])
+    # Based on your code, it seems you conditionally append inputs based on the TYPE
+    tinput = []
+    vinput = []
+
+    if TYPE.find('C') > -1:
+        tinput.append(x_train)
+        vinput.append(x_val)
+
+    if TYPE.find('G') > -1:
+        tinput.append(g_train)
+        vinput.append(g_val)
+
+    tinput = tuple(tinput)
+    vinput = tuple(vinput)
+
+    es = callbacks.EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience=150)
+    mc = callbacks.ModelCheckpoint(str(split_num) + '.model.best', verbose=1, save_best_only=True)
+
+    # Fit the model for this fold
+    history = model.fit(tinput, y_train, validation_data=(vinput, y_val), batch_size=BATCH_SIZE, \
+                        epochs=EPOCHS, use_multiprocessing=True, workers=16, verbose=2, callbacks=[es, mc])
+
+    histories.append(history)
+    split_num += 1
