@@ -25,28 +25,30 @@ import shutil
 import traceback
 from collections import OrderedDict 
 import numpy as np
+from sklearn.model_selection import KFold
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 np.set_printoptions(threshold=np.inf)
+import tensorflow as tf
+from tensorflow.keras import datasets, layers, models, callbacks, Model, optimizers, Input, utils
+from tensorflow.keras.layers import Conv1D, Dropout, AveragePooling1D, Flatten, Dense, concatenate, SpatialDropout1D
+from scipy import stats
+from random import randint
+import sys
 
 
-OPT = 'adam'
+
 LEARN = 0.0001 
 EPOCHS = 5000 
-SEQ_C = "Sequence"
-VAL_C = "total_indel_eff_rescaled" 
-VAL_G = "CRISPRoff_score" 
 SEQ_C = "1"
 VAL_C = "3"
 VAL_G = "2"
 BATCH_SIZE=500 
 SEED = 0 
-TYPE = 'CG' 
 TEST_N = 0
 
 
 
 print(
-'OPT=%s' % OPT,
 'LEARN=%f' % LEARN,
 'EPOCHS=%i' % EPOCHS,
 'SEQ_C=%s' % SEQ_C,
@@ -54,7 +56,6 @@ print(
 'VAL_G=%s' % VAL_G,
 'BATCH_SIZE=%i' % BATCH_SIZE,
 'SEED=%i' % SEED,
-'TYPE=%s' % TYPE,
 )
 
 #length of input seq
@@ -154,61 +155,48 @@ def preprocess_seq(data):
     return (list(dkeys), DATA_X, DATA_G, DATA_Y)
 
 
-import tensorflow as tf
-from tensorflow.keras import datasets, layers, models, callbacks, Model, optimizers, Input, utils
-from tensorflow.keras.layers import Conv1D, Dropout, AveragePooling1D, Flatten, Dense, concatenate, SpatialDropout1D
-from scipy import stats
-from random import randint
-import sys
 
 # check of inputs and setting a few base parameters
 if SEED == 0:
     SEED = randint(0, sys.maxsize)
 print('seed:', SEED)
 tf.random.set_seed(SEED)
-if OPT =='adam':
-    optimizer = optimizers.Adam(LEARN)
-elif OPT == 'rmsprop':
-    optimizer = optimizers.RMSprop(LEARN)
-else:
-    raise Exception
+optimizer = optimizers.Adam(LEARN)
+
 
 #inputs
 #one hot
 inputs = list()
-if TYPE.find('C') > -1:
-    input_c = Input(shape=(eLENGTH, eDEPTH,), name="input_onehot")
-    inputs.append(input_c)
+input_c = Input(shape=(eLENGTH, eDEPTH,), name="input_onehot")
+inputs.append(input_c)
 
 #delta Gb
-if TYPE.find('G') > -1:
-    input_g = Input(shape=(1,), name="input_dGB")
-    inputs.append(input_g)
+input_g = Input(shape=(1,), name="input_dGB")
+inputs.append(input_g)
 
 #
 for_dense = list()
 
 #first convolution layer
-if TYPE.find('C') > -1:
-    conv1_out = Conv1D(100, 3, activation='relu', input_shape=(eLENGTH,4,), name="conv_3")(input_c)
-    conv1_dropout_out = Dropout(0.3, name="drop_3")(conv1_out)
-    conv1_pool_out = AveragePooling1D(2, padding='SAME', name="pool_3")(conv1_dropout_out)
-    conv1_flatten_out = Flatten(name="flatten_3")(conv1_pool_out)
-    for_dense.append(conv1_flatten_out)
+conv1_out = Conv1D(100, 3, activation='relu', input_shape=(eLENGTH,4,), name="conv_3")(input_c)
+conv1_dropout_out = Dropout(0.3, name="drop_3")(conv1_out)
+conv1_pool_out = AveragePooling1D(2, padding='SAME', name="pool_3")(conv1_dropout_out)
+conv1_flatten_out = Flatten(name="flatten_3")(conv1_pool_out)
+for_dense.append(conv1_flatten_out)
 
 #second convolution layer
-    conv2_out = Conv1D(70, 5, activation='relu', input_shape=(eLENGTH,4,), name="conv_5")(input_c)
-    conv2_dropout_out = Dropout(0.3, name="drop_5")(conv2_out)
-    conv2_pool_out = AveragePooling1D(2, padding='SAME', name="pool_5")(conv2_dropout_out)
-    conv2_flatten_out = Flatten(name="flatten_5")(conv2_pool_out)
-    for_dense.append(conv2_flatten_out)
+conv2_out = Conv1D(70, 5, activation='relu', input_shape=(eLENGTH,4,), name="conv_5")(input_c)
+conv2_dropout_out = Dropout(0.3, name="drop_5")(conv2_out)
+conv2_pool_out = AveragePooling1D(2, padding='SAME', name="pool_5")(conv2_dropout_out)
+conv2_flatten_out = Flatten(name="flatten_5")(conv2_pool_out)
+for_dense.append(conv2_flatten_out)
 
 #third convolution layer
-    conv3_out = Conv1D(40, 7, activation='relu', input_shape=(eLENGTH,4,), name="conv_7")(input_c)
-    conv3_dropout_out = Dropout(0.3, name="drop_7")(conv3_out)
-    conv3_pool_out = AveragePooling1D(2, padding='SAME', name="pool_7")(conv3_dropout_out)
-    conv3_flatten_out = Flatten(name="flatten_7")(conv3_pool_out)
-    for_dense.append(conv3_flatten_out)
+conv3_out = Conv1D(40, 7, activation='relu', input_shape=(eLENGTH,4,), name="conv_7")(input_c)
+conv3_dropout_out = Dropout(0.3, name="drop_7")(conv3_out)
+conv3_pool_out = AveragePooling1D(2, padding='SAME', name="pool_7")(conv3_dropout_out)
+conv3_flatten_out = Flatten(name="flatten_7")(conv3_pool_out)
+for_dense.append(conv3_flatten_out)
 
 #concatenation of conv layers and deltaGb layer
 if len(for_dense) == 1:
@@ -225,8 +213,7 @@ for_dense1.append(dense0_dropout_out)
 
 
 #Gb input used raw
-if TYPE.find('G') > -1:
-    for_dense1.append(input_g)
+for_dense1.append(input_g)
 
 
 if len(for_dense1) == 1:
@@ -250,7 +237,7 @@ output = Dense(1, name="output")(dense2_dropout_out)
 model= Model(inputs=inputs, outputs=[output])
 model.summary()
 model.compile(loss='mse', optimizer=optimizer, metrics=['mae', 'mse'])
-utils.plot_model(model, to_file=str(TEST_N) + '.model.png', show_shapes=True, dpi=600)
+#utils.plot_model(model, to_file=str(TEST_N) + '.model.png', show_shapes=True, dpi=600)
 
 
 
@@ -262,47 +249,50 @@ print('reading training data')
 d = read_seq_files(SEQ_C, VAL_C, VAL_G)
 (s, x, g, y) = preprocess_seq(d)
 
-from sklearn.model_selection import KFold
 
-# Number of folds
-n_splits = 6
-kf = KFold(n_splits=n_splits)
 
-# Convert your data to numpy arrays if they aren't already, to ensure compatibility with sklearn's KFold.
-X = np.array(x)
-G = np.array(g)
-Y = np.array(y)
 
-# Placeholder lists for history objects
-histories = []
-split_num = 0
-for train_index, val_index in kf.split(X):
-    # Splitting the data for this fold
-    x_train, x_val = X[train_index], X[val_index]
-    g_train, g_val = G[train_index], G[val_index]
-    y_train, y_val = Y[train_index], Y[val_index]
 
-    # Based on your code, it seems you conditionally append inputs based on the TYPE
-    tinput = []
-    vinput = []
+split_num = 1
+for _ in range (5): #TODO: remove when doint last one
+    print("SEED", SEED)
+    # Number of folds
+    n_splits = 6
+    kf = KFold(n_splits=n_splits)
 
-    if TYPE.find('C') > -1:
+    # Convert your data to numpy arrays if they aren't already, to ensure compatibility with sklearn's KFold.
+    X = np.array(x)
+    G = np.array(g)
+    Y = np.array(y)
+
+    # Placeholder lists for history objects
+    histories = []
+
+    for train_index, val_index in kf.split(X):
+        # Splitting the data for this fold
+        x_train, x_val = X[train_index], X[val_index]
+        g_train, g_val = G[train_index], G[val_index]
+        y_train, y_val = Y[train_index], Y[val_index]
+
+        # Based on your code, it seems you conditionally append inputs based on the TYPE
+        tinput = []
+        vinput = []
+
         tinput.append(x_train)
         vinput.append(x_val)
 
-    if TYPE.find('G') > -1:
         tinput.append(g_train)
         vinput.append(g_val)
 
-    tinput = tuple(tinput)
-    vinput = tuple(vinput)
+        tinput = tuple(tinput)
+        vinput = tuple(vinput)
 
-    es = callbacks.EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience=150)
-    mc = callbacks.ModelCheckpoint(str(split_num) + '.model.best', verbose=1, save_best_only=True)
+        es = callbacks.EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience=100) # Patience was 150
+        mc = callbacks.ModelCheckpoint(str(split_num) + '.model.best', verbose=1, save_best_only=True)
 
-    # Fit the model for this fold
-    history = model.fit(tinput, y_train, validation_data=(vinput, y_val), batch_size=BATCH_SIZE, \
-                        epochs=EPOCHS, use_multiprocessing=True, workers=16, verbose=2, callbacks=[es, mc])
+        # Fit the model for this fold
+        history = model.fit(tinput, y_train, validation_data=(vinput, y_val), batch_size=BATCH_SIZE, \
+                            epochs=EPOCHS, use_multiprocessing=True, workers=16, verbose=2, callbacks=[es, mc])
 
-    histories.append(history)
-    split_num += 1
+        histories.append(history)
+        split_num += 1
